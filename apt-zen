@@ -1,0 +1,404 @@
+#!/bin/bash
+
+# Colors 
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Unicode characters for  visuals
+CHECKMARK="✓"
+CROSS="✗"
+ARROW="→"
+PACKAGE="📦"
+DOWNLOAD="⬇"
+GEAR="⚙"
+EXPAND="▼"
+COLLAPSE="▲"
+
+# Function to print colored headers
+print_header() {
+    echo -e "\n${BLUE}${BOLD}╭────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${BLUE}${BOLD}│${NC} ${WHITE}${BOLD}$1${NC}${BLUE}${BOLD}$(printf "%*s" $((55 - ${#1})) "")│${NC}"
+    echo -e "${BLUE}${BOLD}╰────────────────────────────────────────────────────────╯${NC}\n"
+}
+
+# Function to draw the table header 
+draw_table_header() {
+    echo -e "╭─────────────┬────────────────────────────────┬──────────────────╮"
+    echo -e "│ ${BOLD} Action     ${NC}│ ${BOLD} Package                       ${NC}│ ${BOLD} Version        ${NC} │"
+    echo -e "├─────────────┼────────────────────────────────┼──────────────────┤"
+}
+
+# Function to draw table footer
+draw_table_footer() {
+    echo -e "╰─────────────┴────────────────────────────────┴──────────────────╯"
+}
+
+# Function to show summary (like zen)
+show_summary() {
+    local install_count="$1"
+    local upgrade_count="$2"
+    local remove_count="$3"
+    local download_size="$4"
+    local disk_space="$5"
+    
+    echo -e "\n${BOLD}${WHITE}Summary:${NC}"
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [[ $install_count -gt 0 ]]; then
+        echo -e "${GREEN}${PACKAGE} Install:${NC} ${WHITE}$install_count packages${NC}"
+    fi
+    if [[ $upgrade_count -gt 0 ]]; then
+        echo -e "${YELLOW}${ARROW} Upgrade:${NC} ${WHITE}$upgrade_count packages${NC}"
+    fi
+    if [[ $remove_count -gt 0 ]]; then
+        echo -e "${RED}${CROSS} Remove:${NC} ${WHITE}$remove_count packages${NC}"
+    fi
+    
+    if [[ -n "$download_size" ]]; then
+        echo -e "${CYAN}${DOWNLOAD} Download size:${NC} ${WHITE}$download_size${NC}"
+    fi
+    if [[ -n "$disk_space" ]]; then
+        echo -e "${PURPLE}${GEAR} Disk space required:${NC} ${WHITE}$disk_space${NC}"
+    fi
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+}
+
+# Function to display packages in table 
+display_packages() {
+    local packages_data="$1"
+    local start_index="$2"
+    local end_index="$3"
+    local total_count="$4"
+    
+    local count=0
+    local current_index=0
+    
+    while IFS= read -r line && [[ $current_index -lt $end_index ]]; do
+        if [[ -n "$line" ]] && [[ $current_index -ge $start_index ]]; then
+            local package=$(echo "$line" | cut -d'/' -f1)
+            local version_info=$(echo "$line" | grep -o '\[.*\]' | tr -d '[]')
+            local new_version=$(echo "$version_info" | cut -d' ' -f1)
+            
+            # If version is empty, set to "upgradable"
+            if [[ -z "$new_version" ]]; then
+                new_version="upgradable"
+            fi
+            
+            # Truncate package name if too long (max 30 chars)
+            if [[ ${#package} -gt 30 ]]; then
+                package="${package:0:27}..."
+            fi
+            
+            # Truncate version if too long (max 15 chars)
+            if [[ ${#new_version} -gt 15 ]]; then
+                new_version="${new_version:0:12}..."
+            fi
+            
+            # Print with exact spacing to match header
+            printf "│${YELLOW} %-11s${NC} │ %-30s │ %-15s  │\n" "Upgrade" "$package" "$new_version"
+            ((count++))
+        fi
+        ((current_index++))
+    done <<< "$packages_data"
+}
+
+# Function to display special rows (expand/collapse) 
+display_special_row() {
+    local action="$1"
+    local message="$2"
+    local instruction="$3"
+    local color="$4"
+    
+    # Truncate if needed
+    if [[ ${#message} -gt 30 ]]; then
+        message="${message:0:27}..."
+    fi
+    
+    if [[ ${#instruction} -gt 15 ]]; then
+        instruction="${instruction:0:12}..."
+    fi
+    
+    # Print with exact spacing to match header
+    printf "│${color} %-11s${NC}  │ %-30s │ %-15s  │\n" "$action" "$message" "$instruction"
+}
+
+# Interactive function to show packages with expand/collapse feature
+show_packages_interactive() {
+    local packages_data="$1"
+    local total_count="$2"
+    local max_initial=5
+    local show_expanded=false
+    
+    while true; do
+        # Clear previous table and redraw
+        echo -e "${BOLD}${WHITE}The following packages will be upgraded:${NC}"
+        
+        # Draw header
+        draw_table_header
+        
+        if [[ "$show_expanded" == false ]]; then
+            # Show first 5 packages
+            display_packages "$packages_data" 0 $max_initial $total_count
+            
+            if [[ $total_count -gt $max_initial ]]; then
+                local remaining=$((total_count - max_initial))
+                display_special_row "▼ Click..." "and $remaining more packages" "(press Enter)" "${PURPLE}${BOLD}"
+                draw_table_footer
+                echo -e "\n${CYAN}${BOLD}💡 Press Enter to expand all packages, or Any key to continue...${NC}"
+                
+                read -n 1 -r user_input
+                echo
+                
+                if [[ -z "$user_input" ]]; then
+                    # Enter pressed - expand
+                    show_expanded=true
+                    clear
+                    print_header "System Upgrade"
+                    echo -e "${YELLOW}Found $total_count packages to upgrade${NC}\n"
+                    continue
+                elif [[ "$user_input" =~ ^[Cc]$ ]]; then
+                    break
+                else
+                    break
+                fi
+            else
+                draw_table_footer
+                break
+            fi
+        else
+            # Show all packages
+            display_packages "$packages_data" 0 $total_count $total_count
+            display_special_row "▲ Collapse" "showing all $total_count packages" "(press Enter)" "${PURPLE}${BOLD}"
+            draw_table_footer
+            echo -e "\n${CYAN}${BOLD}💡 Press Enter to collapse, or Any key to continue...${NC}"
+            
+            read -n 1 -r user_input
+            echo
+            
+            if [[ -z "$user_input" ]]; then
+                show_expanded=false
+                clear
+                print_header "System Upgrade"
+                echo -e "${YELLOW}Found $total_count packages to upgrade${NC}\n"
+                continue
+            elif [[ "$user_input" =~ ^[Cc]$ ]]; then
+                break
+            else
+                break
+            fi
+        fi
+    done
+}
+
+# Function for upgrade with interactive expand/collapse
+zen_upgrade() {
+    print_header "System Upgrade"
+    
+    echo -e "${BLUE}${BOLD}Checking for updates...${NC}"
+    sudo apt update -qq
+    
+    # Get actual upgradable packages
+    local upgradable_output=$(apt list --upgradable 2>/dev/null | tail -n +2)
+    local upgradable=$(echo "$upgradable_output" | wc -l)
+    
+    if [[ $upgradable -eq 0 ]]; then
+        echo -e "${GREEN}${CHECKMARK} Your system is up to date!${NC}"
+        return 0
+    fi
+    
+    echo -e "${YELLOW}Found $upgradable packages to upgrade${NC}\n"
+    
+    # Show packages with interactive expand/collapse
+    show_packages_interactive "$upgradable_output" $upgradable
+    
+    # Calculate estimated download size (rough estimation)
+    local estimated_size=$((upgradable * 5))  # Rough estimate: 5MB per package
+    local download_size="${estimated_size} MB (estimated)"
+    local disk_space="$((estimated_size + 20)) MB (estimated)"
+    
+    show_summary 0 $upgradable 0 "$download_size" "$disk_space"
+    
+    echo -e "${YELLOW}${BOLD}Do you want to continue with the upgrade? [Y/n]${NC} "
+    read -n 1 -r reply
+    echo
+    
+    if [[ $reply =~ ^[Yy]$ ]] || [[ -z $reply ]]; then
+        echo -e "\n${BLUE}${BOLD}${DOWNLOAD} Upgrading packages...${NC}"
+        sudo apt upgrade -y
+        echo -e "\n${GREEN}${BOLD}${CHECKMARK} Upgrade completed successfully!${NC}"
+        echo -e "${GREEN}${CHECKMARK} 0 installed, $upgradable upgraded, 0 removed${NC}"
+    else
+        echo -e "${YELLOW}${CROSS} Upgrade cancelled.${NC}"
+    fi
+}
+
+# Function for  install
+zen_install() {
+    local package="$1"
+    
+    print_header "Package Installation"
+    
+    echo -e "${BLUE}${BOLD}Updating package lists...${NC}"
+    sudo apt update -qq 2>/dev/null
+    echo -e "${GREEN}${CHECKMARK} Package lists updated${NC}\n"
+    
+    # Get package info
+    local package_info=$(apt show "$package" 2>/dev/null)
+    local version=$(echo "$package_info" | grep "^Version:" | cut -d' ' -f2)
+    local description=$(echo "$package_info" | grep "^Description:" | cut -d' ' -f2- | head -1)
+    
+    if [[ -z "$version" ]]; then
+        echo -e "${RED}${CROSS} Package '$package' not found${NC}"
+        return 1
+    fi
+    
+    # Show what will be installed
+    echo -e "${BOLD}${WHITE}The following packages will be installed:${NC}"
+    draw_table_header
+    printf "│${GREEN} %-11s${NC} │ %-30s │ %-15s │\n" "Install" "$package" "$version"
+    draw_table_footer
+    
+    # Show dependencies
+    local deps=$(apt-cache depends "$package" 2>/dev/null | grep "Depends:" | wc -l)
+    if [[ $deps -gt 0 ]]; then
+        echo -e "\n${PURPLE}${BOLD}Dependencies:${NC} ${WHITE}$deps additional packages${NC}"
+    fi
+    
+    show_summary 1 0 0 "Unknown" "Unknown"
+    
+    # Confirmation
+    echo -e "${YELLOW}${BOLD}Do you want to continue? [Y/n]${NC} "
+    read -n 1 -r reply
+    echo
+    
+    if [[ $reply =~ ^[Yy]$ ]] || [[ -z $reply ]]; then
+        echo -e "\n${BLUE}${BOLD}Installing packages...${NC}"
+        sudo apt install -y "$package"
+        echo -e "\n${GREEN}${BOLD}${CHECKMARK} Installation completed successfully!${NC}"
+    else
+        echo -e "${YELLOW}Installation cancelled.${NC}"
+    fi
+}
+
+# Function for  search
+zen_search() {
+    local query="$1"
+    
+    print_header "Package Search Results"
+    
+    echo -e "${BLUE}Searching for: ${WHITE}${BOLD}$query${NC}\n"
+    
+    # Header for results
+    draw_table_header
+    
+# Search and format results
+apt search "$query" 2>/dev/null | grep -E "^[a-zA-Z0-9].*/" | head -10 | while IFS= read -r line; do
+    local package=$(echo "$line" | cut -d'/' -f1)
+    local version=$(echo "$line" | cut -d' ' -f2)
+    local desc=$(echo "$line" | sed 's/^[^-]*- *//' | cut -c1-15)
+    
+    # Clean up version if empty
+    if [[ -z "$version" || "$version" == *"["* ]]; then
+        version="available"
+    fi
+    
+    # Truncate package name if too long (max 30 chars)
+    if [[ ${#package} -gt 30 ]]; then
+        package="${package:0:27}..."
+    fi
+    
+    # Truncate version if too long (max 15 chars)
+    if [[ ${#version} -gt 15 ]]; then
+        version="${version:0:12}..."
+    fi
+    
+    # Truncate description if too long (max 15 chars)
+    if [[ ${#desc} -gt 15 ]]; then
+        desc="${desc:0:12}..."
+    fi
+    
+    printf "│${CYAN} %-11s${NC} │ %-30s │ %-15s  │\n" "Available" "$package" "$version"
+done
+
+	    
+    draw_table_footer
+    echo -e "\n${PURPLE}Showing top 10 results. Use 'apt search $query' for more.${NC}"
+}
+
+print_help_header() {
+    local title="$1"
+    echo -e "\n${BLUE}${BOLD}╭────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${BLUE}${BOLD}│${NC} ${WHITE}${BOLD}apt-zen 🧘 Zen Package Manager${NC}                    ${BLUE}${BOLD}     │${NC}"
+    echo -e "${BLUE}${BOLD}╰────────────────────────────────────────────────────────╯${NC}\n"
+}
+
+# Elegant help function
+show_help() {
+    print_help_header
+    
+    echo -e "${CYAN}${BOLD}A beautiful, peaceful APT wrapper for mindful package management${NC}\n"
+    
+    # Commands section with zen styling
+    echo -e "${BLUE}${BOLD}╭─ Commands ────────────────────────────────────────────────╮${NC}"
+    echo -e "${BLUE}${BOLD}│${NC}                                                           ${BLUE}${BOLD}│${NC}"
+    echo -e "${BLUE}${BOLD}│${NC}  ${GREEN}${BOLD}install${NC} ${WHITE}<package>${NC}   Install a package peacefully     ${BLUE}${BOLD}    │${NC}"
+    echo -e "${BLUE}${BOLD}│${NC}  ${YELLOW}${BOLD}search${NC}  ${WHITE}<query>${NC}     Find packages in harmony         ${BLUE}${BOLD}    │${NC}"
+    echo -e "${BLUE}${BOLD}│${NC}  ${PURPLE}${BOLD}upgrade${NC}             Upgrade system with mindfulness  ${BLUE}${BOLD}    │${NC}"
+    echo -e "${BLUE}${BOLD}│${NC}                                                           ${BLUE}${BOLD}│${NC}"
+    echo -e "${BLUE}${BOLD}╰───────────────────────────────────────────────────────────╯${NC}\n"
+    
+    # Examples section
+    echo -e "${PURPLE}${BOLD}✨ Examples:${NC}"
+    echo -e "   ${CYAN}sudo apt-zen upgrade${NC}        ${WHITE} # Update your system${NC}"
+    echo -e "   ${CYAN}sudo apt-zen install firefox${NC} ${WHITE}# Install Firefox${NC}"
+    echo -e "   ${CYAN}apt-zen search browser${NC}       ${WHITE}# Find browsers${NC}\n"
+    
+    # Zen features
+    echo -e "${YELLOW}${BOLD}🧘 Zen Features:${NC}"
+    echo -e "   ${GREEN}${CHECKMARK}${NC} ${WHITE}Clean, minimalist interface${NC}"
+    echo -e "   ${GREEN}${CHECKMARK}${NC} ${WHITE}Interactive expand/collapse${NC}"
+    echo -e "   ${GREEN}${CHECKMARK}${NC} ${WHITE}Peaceful color harmony${NC}"
+    echo -e "   ${GREEN}${CHECKMARK}${NC} ${WHITE}Mindful package management${NC}\n"
+    
+    # Footer with zen quote
+    echo -e "${BLUE}${BOLD}╭─────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${BLUE}${BOLD}│${NC} ${WHITE}${BOLD}\"Like waves that gently touch the shore, let packages${NC}   ${BLUE}${BOLD}│${NC}"
+    echo -e "${BLUE}${BOLD}│${NC} ${WHITE}${BOLD} flow peacefully through your system.\"${NC}            ${BLUE}${BOLD}      │${NC}"
+    echo -e "${BLUE}${BOLD}│${NC}                                        ${CYAN}- ShoreNexx${NC} ${BLUE}${BOLD}     │${NC}"
+    echo -e "${BLUE}${BOLD}╰─────────────────────────────────────────────────────────╯${NC}"
+}
+
+# Main function
+main() {
+    case "$1" in
+        install)
+            if [[ -z "$2" ]]; then
+                echo -e "${RED}Usage: apt-zen install <package>${NC}"
+                exit 1
+            fi
+            zen_install "$2"
+            ;;
+        search)
+            if [[ -z "$2" ]]; then
+                echo -e "${RED}Usage: apt-zen search  <query>${NC}"
+                exit 1
+            fi
+            zen_search "$2"
+            ;;
+        upgrade)
+            zen_upgrade
+            ;;
+        *)
+            show_help
+            ;;
+    esac
+}
+
+main "$@"
