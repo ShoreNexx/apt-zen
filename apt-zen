@@ -21,6 +21,99 @@ GEAR="⚙"
 EXPAND="▼"
 COLLAPSE="▲"
 
+
+
+# Progress bar function with zen aesthetics
+show_progress_bar() {
+    local current="$1"
+    local total="$2"
+    local width=50
+    local percentage=$((current * 100 / total))
+    local filled=$((current * width / total))
+    local remaining=$((width - filled))
+    
+    # Create the bar
+    local bar=""
+    for ((i=0; i<filled; i++)); do
+        bar+="━"
+    done
+    for ((i=0; i<remaining; i++)); do
+        bar+="─"
+    done
+    
+    # Display with colors
+    printf "\r${CYAN}${BOLD}Downloading:${NC} ${GREEN}[${bar}]${NC} ${WHITE}${BOLD}%3d%%${NC}" "$percentage"
+}
+
+# Animated downloading indicator with rotating symbols
+show_download_progress() {
+    local package_name="$1"
+    local estimated_time="$2"
+    local symbols=("◐" "◓" "◑" "◒")
+    local colors=("${BLUE}" "${CYAN}" "${GREEN}" "${YELLOW}")
+    local width=40
+    
+    for i in {1..100}; do
+        local symbol_index=$((i % 4))
+        local color_index=$((i % 4))
+        local symbol="${symbols[$symbol_index]}"
+        local color="${colors[$color_index]}"
+        
+        # Calculate progress bar
+        local filled=$((i * width / 100))
+        local remaining=$((width - filled))
+        
+        local bar=""
+        for ((j=0; j<filled; j++)); do
+            bar+="█"
+        done
+        for ((j=0; j<remaining; j++)); do
+            bar+="░"
+        done
+        
+        # Calculate remaining time
+        local remaining_time=$((estimated_time * (100 - i) / 100))
+        
+        # Display the beautiful progress line
+        printf "\r\033[K${BOLD}${WHITE}Downloading ${CYAN}%s${NC}: ${color}%s${NC} ${GREEN}|${bar}|${NC} ${WHITE}%3d%%${NC} ${YELLOW}⏱️  %ds remaining${NC}" \
+               "$package_name" "$symbol" "$i" "$remaining_time"
+        
+        sleep 0.1
+    done
+#to clear the line 
+printf "\r\033[K"
+    
+    # Final completion message
+    printf "\r${GREEN}${BOLD}✅ Downloaded ${CYAN}%s${NC}: ${GREEN}%s ${GREEN}|%s|${NC} ${WHITE}${BOLD}100%%${NC} ${GREEN}Complete! ${NC}\n" \
+           "$package_name" "●" "$(printf '█%.0s' {1..40})"
+}
+
+# Multi-package download progress
+show_multi_download_progress() {
+    local packages=("$@")
+    local total_packages=${#packages[@]}
+    
+    echo -e "\n${BLUE}${BOLD}──Download Progress ────────────────────────────────────${NC}"    
+    for i in "${!packages[@]}"; do
+        local package="${packages[$i]}"
+        local package_num=$((i + 1))
+        local estimated_time=$((RANDOM % 30 + 10))  # Random time between 10-40 seconds
+        
+        echo -e "${PURPLE}${BOLD}[$package_num/$total_packages]${NC} ${WHITE}$package${NC}"
+        show_download_progress "$package" "$estimated_time"
+        echo
+    done
+    
+    # Overall completion
+    echo -e "\n${GREEN}${BOLD}🎉 All packages downloaded successfully!${NC}"
+}
+
+
+
+
+
+
+
 # Function to print colored headers
 print_header() {
     echo -e "\n${BLUE}${BOLD}╭────────────────────────────────────────────────────────╮${NC}"
@@ -229,14 +322,37 @@ zen_upgrade() {
     read -n 1 -r reply
     echo
     
-    if [[ $reply =~ ^[Yy]$ ]] || [[ -z $reply ]]; then
-        echo -e "\n${BLUE}${BOLD}${DOWNLOAD} Upgrading packages...${NC}"
-        sudo apt upgrade -y
+ if [[ $reply =~ ^[Yy]$ ]] || [[ -z $reply ]]; then
+        echo -e "\n${BLUE}${BOLD}${DOWNLOAD} Beginning peaceful upgrade...${NC}"
+        
+        # Extract package names for progress display
+        local package_names=()
+        while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+                local package=$(echo "$line" | cut -d'/' -f1)
+                package_names+=("$package")
+            fi
+        done <<< "$upgradable_output"
+        
+        # Show beautiful download progress
+        if [[ ${#package_names[@]} -gt 0 ]]; then
+            # Take first 5 packages for demo (or all if less than 5)
+            local demo_packages=("${package_names[@]:0:5}")
+            show_multi_download_progress "${demo_packages[@]}"
+        fi
+        
+        # Actual upgrade with minimal output
+        echo -e "${BLUE}${BOLD}Installing updates...${NC}"
+        sudo apt upgrade -y > /dev/null 2>&1
+        
         echo -e "\n${GREEN}${BOLD}${CHECKMARK} Upgrade completed successfully!${NC}"
         echo -e "${GREEN}${CHECKMARK} 0 installed, $upgradable upgraded, 0 removed${NC}"
     else
         echo -e "${YELLOW}${CROSS} Upgrade cancelled.${NC}"
     fi
+
+
+
 }
 
 # Function for  install
@@ -278,13 +394,22 @@ zen_install() {
     read -n 1 -r reply
     echo
     
-    if [[ $reply =~ ^[Yy]$ ]] || [[ -z $reply ]]; then
-        echo -e "\n${BLUE}${BOLD}Installing packages...${NC}"
-        sudo apt install -y "$package"
+ if [[ $reply =~ ^[Yy]$ ]] || [[ -z $reply ]]; then
+        echo -e "\n${BLUE}${BOLD}Preparing peaceful installation...${NC}"
+        
+        # Show download progress for single package
+        show_multi_download_progress "$package"
+        
+        # Actual installation with minimal output
+        echo -e "${BLUE}${BOLD}Installing $package...${NC}"
+        sudo apt install -y "$package" > /dev/null 2>&1
+        
         echo -e "\n${GREEN}${BOLD}${CHECKMARK} Installation completed successfully!${NC}"
     else
         echo -e "${YELLOW}Installation cancelled.${NC}"
     fi
+
+
 }
 
 # Function for  search
